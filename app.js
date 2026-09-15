@@ -91,7 +91,7 @@ function toast(msg, type = '') {
 /* Bluetooth                                                              */
 /* ---------------------------------------------------------------------- */
 
-async function scanAndConnect() {
+async function scanAndConnect(mode = 'filtered') {
   if (!navigator.bluetooth) {
     document.getElementById('ble-support-warning').classList.remove('hidden');
     document.getElementById('ble-support-warning').textContent =
@@ -100,16 +100,31 @@ async function scanAndConnect() {
   }
 
   try {
-    const btDevice = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_UUID] }],
-      optionalServices: [SERVICE_UUID],
-    });
+    // "filtered" only lists devices that advertise SERVICE_UUID directly in
+    // their advertising packet — fast and clean, but some peripherals only
+    // expose their services after connection and simply won't show up here.
+    // "all" (acceptAllDevices) lists every nearby BLE device by name instead,
+    // as a fallback for that case. optionalServices is what actually grants
+    // GATT access to SERVICE_UUID once connected, in either mode.
+    const requestOptions = mode === 'all'
+      ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID] }
+      : { filters: [{ services: [SERVICE_UUID] }], optionalServices: [SERVICE_UUID] };
+
+    const btDevice = await navigator.bluetooth.requestDevice(requestOptions);
 
     const id = btDevice.id;
     log(id, 'sys', `Connecting to ${btDevice.name || id}…`);
 
     const server = await btDevice.gatt.connect();
-    const service = await server.getPrimaryService(SERVICE_UUID);
+    let service;
+    try {
+      service = await server.getPrimaryService(SERVICE_UUID);
+    } catch (e) {
+      server.disconnect();
+      toast(`${btDevice.name || 'That device'} doesn't expose the expected service — probably not a tail-line device`, 'error');
+      log(id, 'sys', `Connected but service ${SERVICE_UUID} not found on ${btDevice.name || id}. Disconnected.`);
+      return;
+    }
     const txChar = await service.getCharacteristic(TX_UUID);
     const rxChar = await service.getCharacteristic(RX_UUID);
     let battChar = null;
@@ -496,7 +511,8 @@ function wireCommandButtons() {
 }
 
 function wireConnection() {
-  document.getElementById('btn-scan').addEventListener('click', scanAndConnect);
+  document.getElementById('btn-scan').addEventListener('click', () => scanAndConnect('filtered'));
+  document.getElementById('btn-scan-all').addEventListener('click', () => scanAndConnect('all'));
 }
 
 function wireSettings() {
