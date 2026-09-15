@@ -99,9 +99,21 @@
             <h2>Scan for a device</h2>
             <p class="muted">Your browser will show a chooser — this is required by Web Bluetooth and can't be skipped. Devices won't show up in your phone or computer's normal Bluetooth settings.</p>
           </div>
-          <button class="btn btn-accent" id="btn-scan">Scan &amp; connect</button>
+          <div class="btn-group">
+            <button class="btn btn-accent" id="btn-scan">Scan &amp; connect</button>
+          </div>
         </div>
         <div id="ble-support-warning" class="warning hidden"></div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <div class="panel-row-between">
+          <div>
+            <h2>Not showing up?</h2>
+            <p class="muted">Some gear only exposes its full service list after you connect, so it won't appear in a filtered scan even when it's on and in range. This mode lists every nearby BLE device by name instead — pick the tail from the list.</p>
+          </div>
+          <button class="btn btn-ghost" id="btn-scan-all">Show all nearby devices</button>
+        </div>
       </div>
 
       <div class="panel" style="margin-top:20px;">
