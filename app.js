@@ -9,7 +9,30 @@
 const SERVICE_UUID = '19f8ade2-d0c6-4c0a-912a-30601d9b3060';
 const RX_UUID      = '5e4d86ac-ef2f-466f-a857-8776d45ffbc2'; // notify: device -> app
 const TX_UUID      = '567a99d6-a442-4ac0-b676-4993bf95f805'; // write:  app -> device
-const BATT_UUID    = 'e818bda3-88a7-43c0-8509-6e0bbb6f55d9'; // battery voltage
+const BATT_UUID    = 'e818bda3-88a7-43c0-8509-6e0bbb6f55d9'; // battery voltage (custom, per spec doc)
+
+// A live GATT inspection of an actual mitail unit found a *different* set of
+// UUIDs than the ones in the spec doc above — the doc may be stale, or this
+// firmware revision may have moved on. We try the documented UUIDs first,
+// then fall back to these, so the app still works whichever a given device
+// actually implements. Run a BLE inspector against your other four products
+// to see which set (if either) they match.
+const DISCOVERED_SERVICE_UUID = '3af2108b-d066-42da-a7d4-55648fa0a9b6';
+const DISCOVERED_RX_UUID      = 'c6612b64-0087-4974-939e-68968ef294b0'; // readable, saw "mitail ready"
+const DISCOVERED_TX_UUID      = '5bfd6484-ddee-4723-bfe6-b653372bbfd6'; // "Read Not Permitted" = write-only
+
+// Standard Bluetooth SIG Battery Service — the mitail unit exposes battery
+// level here, standard-issue, alongside two custom characteristics
+// (voltage, charging state) grouped into the same service.
+const BATTERY_SERVICE_UUID       = '0000180f-0000-1000-8000-00805f9b34fb';
+const BATTERY_LEVEL_UUID         = '00002a19-0000-1000-8000-00805f9b34fb'; // standard, single byte 0-100
+const BATTERY_VOLTAGE_CUSTOM_UUID   = 'b08fed02-0584-40ef-b006-aff7e0d24e13'; // format unconfirmed
+const CHARGING_STATE_CUSTOM_UUID    = '5073792e-4fc0-45a0-b0a5-78b6c1756c91'; // format unconfirmed
+
+const PROTOCOL_CANDIDATES = [
+  { service: SERVICE_UUID, tx: TX_UUID, rx: RX_UUID, label: 'documented' },
+  { service: DISCOVERED_SERVICE_UUID, tx: DISCOVERED_TX_UUID, rx: DISCOVERED_RX_UUID, label: 'discovered' },
+];
 
 // Product name matching, used to label a device once we know its BLE name.
 const PRODUCTS = [
@@ -107,8 +130,8 @@ async function scanAndConnect(mode = 'filtered') {
     // as a fallback for that case. optionalServices is what actually grants
     // GATT access to SERVICE_UUID once connected, in either mode.
     const requestOptions = mode === 'all'
-      ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID] }
-      : { filters: [{ services: [SERVICE_UUID] }], optionalServices: [SERVICE_UUID] };
+      ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID, DISCOVERED_SERVICE_UUID, BATTERY_SERVICE_UUID] }
+      : { filters: [{ services: [SERVICE_UUID] }, { services: [DISCOVERED_SERVICE_UUID] }], optionalServices: [SERVICE_UUID, DISCOVERED_SERVICE_UUID, BATTERY_SERVICE_UUID] };
 
     const btDevice = await navigator.bluetooth.requestDevice(requestOptions);
 
@@ -116,19 +139,33 @@ async function scanAndConnect(mode = 'filtered') {
     log(id, 'sys', `Connecting to ${btDevice.name || id}…`);
 
     const server = await btDevice.gatt.connect();
-    let service;
-    try {
-      service = await server.getPrimaryService(SERVICE_UUID);
-    } catch (e) {
+
+    // Try each known protocol layout until one actually has the service.
+    let service = null, txChar = null, rxChar = null, matchedProtocol = null;
+    for (const candidate of PROTOCOL_CANDIDATES) {
+      try {
+        service = await server.getPrimaryService(candidate.service);
+        txChar = await service.getCharacteristic(candidate.tx);
+        rxChar = await service.getCharacteristic(candidate.rx);
+        matchedProtocol = candidate.label;
+        break;
+      } catch (e) { /* try the next candidate */ }
+    }
+    if (!service) {
       server.disconnect();
-      toast(`${btDevice.name || 'That device'} doesn't expose the expected service — probably not a tail-line device`, 'error');
-      log(id, 'sys', `Connected but service ${SERVICE_UUID} not found on ${btDevice.name || id}. Disconnected.`);
+      toast(`${btDevice.name || 'That device'} doesn't match any known protocol layout`, 'error');
+      log(id, 'sys', `No known service found on ${btDevice.name || id}. Disconnected.`);
       return;
     }
-    const txChar = await service.getCharacteristic(TX_UUID);
-    const rxChar = await service.getCharacteristic(RX_UUID);
+    log(id, 'sys', `Matched ${matchedProtocol} protocol layout.`);
+
     let battChar = null;
-    try { battChar = await service.getCharacteristic(BATT_UUID); } catch (e) { /* optional */ }
+    try {
+      const battService = await server.getPrimaryService(BATTERY_SERVICE_UUID);
+      battChar = await battService.getCharacteristic(BATTERY_LEVEL_UUID);
+    } catch (e) { /* optional, or documented custom BATT_UUID may live directly on the main service */
+      try { battChar = await service.getCharacteristic(BATT_UUID); } catch (e2) { /* not present */ }
+    }
 
     const record = {
       id,
@@ -137,6 +174,7 @@ async function scanAndConnect(mode = 'filtered') {
       txChar,
       rxChar,
       battChar,
+      protocol: matchedProtocol,
       name: btDevice.name || 'Unnamed device',
       product: guessProduct(btDevice.name),
       connected: true,
@@ -146,6 +184,14 @@ async function scanAndConnect(mode = 'filtered') {
     state.devices.set(id, record);
     state.activeDeviceId = id;
 
+    // Read whatever's already sitting in RX before subscribing — some
+    // firmware exposes a readable status string (e.g. "mitail ready") here.
+    try {
+      const initial = await rxChar.readValue();
+      const text = decodeValue(initial);
+      if (text) log(id, 'rx', text);
+    } catch (e) { /* not readable, notify-only — fine */ }
+
     await rxChar.startNotifications();
     rxChar.addEventListener('characteristicvaluechanged', (ev) => {
       const text = decodeValue(ev.target.value);
@@ -154,6 +200,10 @@ async function scanAndConnect(mode = 'filtered') {
     });
 
     if (battChar) {
+      try {
+        const initialBatt = await battChar.readValue();
+        record.battery = decodeBattery(initialBatt);
+      } catch (e) { /* not readable up front, fine */ }
       try {
         await battChar.startNotifications();
         battChar.addEventListener('characteristicvaluechanged', (ev) => {
@@ -188,10 +238,15 @@ function decodeValue(dataView) {
   }
 }
 
-// Best-effort battery parse: tries text first (e.g. "BATT 3.98"), then
-// falls back to a little-endian uint16 millivolt reading. Adjust this if
-// your firmware's encoding differs.
+// Standard Bluetooth Battery Level characteristic (0x2A19) is a single byte,
+// 0-100, meaning percent — that's what a mitail unit actually exposes. Falls
+// back to a text or little-endian millivolt guess for the custom BATT_UUID
+// fallback path, in case a different product in the line uses that instead.
 function decodeBattery(dataView) {
+  if (dataView.byteLength === 1) {
+    const pct = dataView.getUint8(0);
+    if (pct <= 100) return `${pct}%`;
+  }
   try {
     const text = new TextDecoder().decode(dataView).trim();
     if (/^[\x20-\x7e]+$/.test(text) && text.length) return text;
