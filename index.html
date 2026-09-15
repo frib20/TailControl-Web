@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tail Control</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><text y=%2224%22 font-size=%2224%22>🦊</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="wallpaper-layer"></div>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🦊</div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-tab="welcome">
+        <span class="nav-ico">⌂</span><span>Welcome</span>
+      </button>
+      <button class="nav-item" data-tab="controls">
+        <span class="nav-ico">⚙</span><span>Controls</span>
+      </button>
+      <button class="nav-item" data-tab="settings">
+        <span class="nav-ico">☼</span><span>Settings</span>
+      </button>
+      <button class="nav-item" data-tab="log">
+        <span class="nav-ico">☰</span><span>Log</span>
+      </button>
+      <button class="nav-item" data-tab="manual">
+        <span class="nav-ico">◷</span><span>Manual</span>
+      </button>
+      <button class="nav-item" data-tab="auto">
+        <span class="nav-ico">✺</span><span>Autonomous</span>
+      </button>
+      <button class="nav-item" data-tab="connection">
+        <span class="nav-ico">∞</span><span>Connection</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="device-pill" id="active-device-pill">No device selected</div>
+      <div class="version">v0.1.0</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- WELCOME -->
+    <section class="tab active" id="tab-welcome">
+      <header class="page-head">
+        <h1>Welcome</h1>
+        <p>Get started with your workspace.</p>
+      </header>
+
+      <div class="card-row">
+        <button class="quick-card" data-goto="connection">
+          <div class="quick-ico">∞</div>
+          <div class="quick-title">Connect a device</div>
+          <div class="quick-sub">Pair a tail, ear, or wing over Bluetooth LE</div>
+        </button>
+        <button class="quick-card" data-goto="manual">
+          <div class="quick-ico">◷</div>
+          <div class="quick-title">Try manual control</div>
+          <div class="quick-sub">Drive the servo directly, position by position</div>
+        </button>
+        <button class="quick-card" data-goto="auto">
+          <div class="quick-ico">✺</div>
+          <div class="quick-title">Set up autonomous mode</div>
+          <div class="quick-sub">Let it move on its own, on a random timer</div>
+        </button>
+      </div>
+
+      <div class="panel" style="margin-top:28px;">
+        <h2>Connected devices</h2>
+        <div id="welcome-device-list" class="device-grid empty-state">No devices connected yet. Head to the Connection tab to scan.</div>
+      </div>
+    </section>
+
+    <!-- CONNECTION -->
+    <section class="tab" id="tab-connection">
+      <header class="page-head">
+        <h1>Connection</h1>
+        <p>Discover and pair devices over Bluetooth LE. Works with all products in the line.</p>
+      </header>
+
+      <div class="panel">
+        <div class="panel-row-between">
+          <div>
+            <h2>Scan for a device</h2>
+            <p class="muted">Your browser will show a chooser — this is required by Web Bluetooth and can't be skipped. Devices won't show up in your phone or computer's normal Bluetooth settings.</p>
+          </div>
+          <button class="btn btn-accent" id="btn-scan">Scan &amp; connect</button>
+        </div>
+        <div id="ble-support-warning" class="warning hidden"></div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Paired this session</h2>
+        <div id="connection-device-list" class="device-list empty-state">No devices yet.</div>
+      </div>
+    </section>
+
+    <!-- CONTROLS (moves list) -->
+    <section class="tab" id="tab-controls">
+      <header class="page-head">
+        <h1>Controls</h1>
+        <p>Trigger a named movement on the active device.</p>
+      </header>
+
+      <div class="panel">
+        <div class="device-select-row">
+          <label for="controls-device-select">Active device</label>
+          <select id="controls-device-select" class="device-select"></select>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Moves</h2>
+        <div class="moves-grid" id="moves-grid"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="tab" id="tab-settings">
+      <header class="page-head">
+        <h1>Settings</h1>
+        <p>Device settings, configuration, and app appearance.</p>
+      </header>
+
+      <div class="panel">
+        <div class="device-select-row">
+          <label for="settings-device-select">Active device</label>
+          <select id="settings-device-select" class="device-select"></select>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Device settings</h2>
+        <div class="settings-grid">
+          <button class="btn btn-ghost" data-cmd="FORMATNVS">Format</button>
+          <button class="btn btn-ghost" data-cmd="REBOOT">Reboot</button>
+          <button class="btn btn-ghost" data-cmd="SETHOLDONSTOP">Hold on stop</button>
+          <button class="btn btn-ghost" data-cmd="UNSETHOLDONSTOP">Disable hold</button>
+          <button class="btn btn-ghost" data-cmd="BATT">Read battery</button>
+          <button class="btn btn-ghost" data-cmd="OTA">Fetch update</button>
+          <button class="btn btn-ghost" data-cmd="HWVER">Hardware version</button>
+          <button class="btn btn-ghost" data-cmd="VER">Software version</button>
+          <button class="btn btn-danger" data-cmd="SHUTDOWN">Shutdown</button>
+        </div>
+
+        <div class="inline-set-row">
+          <label>Auto power-off timer (minutes, 0 = disabled)</label>
+          <input type="number" min="0" id="disconnect-timer-input" class="text-input" placeholder="e.g. 30">
+          <button class="btn btn-ghost" id="btn-set-disconnect-timer">Set</button>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <div class="panel-row-between">
+          <h2>Configuration</h2>
+          <div class="btn-group">
+            <button class="btn btn-ghost" id="btn-readconf">Read from device</button>
+            <button class="btn btn-accent" id="btn-writeconf">Write to device</button>
+          </div>
+        </div>
+        <div class="conf-grid" id="conf-grid"></div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Wallpaper</h2>
+        <p class="muted">Set a custom background image. It's saved in this browser and persists between visits.</p>
+        <div class="wallpaper-row">
+          <input type="file" id="wallpaper-input" accept="image/*">
+          <button class="btn btn-ghost" id="btn-clear-wallpaper">Remove wallpaper</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MANUAL -->
+    <section class="tab" id="tab-manual">
+      <header class="page-head">
+        <h1>Manual</h1>
+        <p>Direct servo positioning (DSSP). Sent immediately to the active device.</p>
+      </header>
+
+      <div class="panel">
+        <div class="device-select-row">
+          <label for="manual-device-select">Active device</label>
+          <select id="manual-device-select" class="device-select"></select>
+        </div>
+      </div>
+
+      <div class="panel dpad-panel" style="margin-top:20px;">
+        <div class="dpad" id="dpad">
+          <button class="dpad-btn dpad-up" data-cmd="DSSP A0B8 L5M5">Up</button>
+          <button class="dpad-btn dpad-left" data-cmd="DSSP A0B0 L5M5">Left</button>
+          <button class="dpad-btn dpad-center" data-cmd="DSSP A4B4 L5M5">Center</button>
+          <button class="dpad-btn dpad-right" data-cmd="DSSP A8B8 L5M5">Right</button>
+          <button class="dpad-btn dpad-downleft" data-cmd="DSSP A0B4 L5M5">Down-left</button>
+          <button class="dpad-btn dpad-down" data-cmd="DSSP A8B0 L5M5">Down</button>
+          <button class="dpad-btn dpad-downright" data-cmd="DSSP A4B8 L5M5">Down-right</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- AUTONOMOUS -->
+    <section class="tab" id="tab-auto">
+      <header class="page-head">
+        <h1>Autonomous</h1>
+        <p>Runs on the device itself — it keeps moving even if you disconnect.</p>
+      </header>
+
+      <div class="panel">
+        <div class="device-select-row">
+          <label for="auto-device-select">Active device</label>
+          <select id="auto-device-select" class="device-select"></select>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Mood groups</h2>
+        <div class="mood-grid">
+          <label class="mood-card">
+            <input type="checkbox" value="G1" class="mood-check">
+            <div class="mood-title">Calm &amp; relaxed</div>
+            <div class="mood-sub">Slow wag 1 · Slow wag 2 · Slow wag 3</div>
+          </label>
+          <label class="mood-card">
+            <input type="checkbox" value="G2" class="mood-check">
+            <div class="mood-title">Fast &amp; excited</div>
+            <div class="mood-sub">Fast wag · Short wag · Happy wag · Erect</div>
+          </label>
+          <label class="mood-card">
+            <input type="checkbox" value="G3" class="mood-check">
+            <div class="mood-title">Frustrated &amp; tense</div>
+            <div class="mood-sub">Tremble 1 · Tremble 2 · Erect tremble · High wag</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <h2>Timing between moves</h2>
+        <div class="timing-row">
+          <div class="timing-field">
+            <label>Minimum (seconds)</label>
+            <input type="number" min="1" id="t-min" class="text-input" value="15">
+          </div>
+          <div class="timing-field">
+            <label>Maximum (seconds, optional)</label>
+            <input type="number" min="1" id="t-max" class="text-input" placeholder="same as minimum">
+          </div>
+        </div>
+        <div class="command-preview" id="automode-preview">AUTOMODE T15</div>
+      </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <div class="btn-group">
+          <button class="btn btn-accent" id="btn-automode-play">▶ Play</button>
+          <button class="btn btn-ghost" id="btn-stopnpm">■ Stop (STOPNPM)</button>
+          <button class="btn btn-ghost" id="btn-stopauto">■ Stop (STOPAUTO)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section class="tab" id="tab-log">
+      <header class="page-head">
+        <h1>Log</h1>
+        <p>Raw traffic to and from connected devices.</p>
+      </header>
+      <div class="panel">
+        <div class="panel-row-between">
+          <h2>Console</h2>
+          <button class="btn btn-ghost" id="btn-clear-log">Clear</button>
+        </div>
+        <div class="console" id="console"></div>
+        <div class="console-input-row">
+          <select id="console-device-select" class="device-select"></select>
+          <input type="text" id="console-input" class="text-input" placeholder="Raw command, e.g. VER">
+          <button class="btn btn-accent" id="btn-console-send">Send</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast-host"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
