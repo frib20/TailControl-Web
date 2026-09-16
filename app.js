@@ -159,6 +159,12 @@ async function scanAndConnect(mode = 'filtered') {
     }
     log(id, 'sys', `Matched ${matchedProtocol} protocol layout.`);
 
+    // Enumerate every service/characteristic the device actually exposes,
+    // for the Raw GATT explorer — this is what lets you test writes against
+    // characteristics we didn't guess correctly.
+    const allChars = await discoverAllCharacteristics(server);
+    log(id, 'sys', `Discovered ${allChars.length} characteristic(s) across all services.`);
+
     let battChar = null;
     try {
       const battService = await server.getPrimaryService(BATTERY_SERVICE_UUID);
@@ -175,6 +181,8 @@ async function scanAndConnect(mode = 'filtered') {
       rxChar,
       battChar,
       protocol: matchedProtocol,
+      allChars,
+      gattSubscriptions: new Map(), // charKey -> listener fn, for the explorer's Subscribe toggle
       name: btDevice.name || 'Unnamed device',
       product: guessProduct(btDevice.name),
       connected: true,
@@ -228,6 +236,52 @@ async function scanAndConnect(mode = 'filtered') {
     console.error(err);
     toast(`Connection failed: ${err.message}`, 'error');
   }
+}
+
+// Walk every primary service on the device and every characteristic on
+// each, so the Raw GATT explorer can offer literally everything the device
+// exposes rather than just the UUIDs we guessed correctly.
+async function discoverAllCharacteristics(server) {
+  const results = [];
+  try {
+    const services = await server.getPrimaryServices();
+    for (const service of services) {
+      try {
+        const chars = await service.getCharacteristics();
+        for (const char of chars) {
+          results.push({
+            key: `${service.uuid}::${char.uuid}`,
+            serviceUuid: service.uuid,
+            charUuid: char.uuid,
+            char,
+            properties: char.properties,
+          });
+        }
+      } catch (e) { /* some services may refuse enumeration */ }
+    }
+  } catch (e) {
+    // getPrimaryServices() with no filter requires the site to have
+    // "generic access" to enumerate everything; if that's blocked, fall
+    // back to nothing — the explorer will just be empty for this device.
+  }
+  return results;
+}
+
+function shortUuid(uuid) {
+  const m = /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/i.exec(uuid);
+  if (m) return `0x${m[1].toUpperCase()}`;
+  return uuid.split('-')[0];
+}
+
+function propsBadges(props) {
+  if (!props) return '';
+  const flags = [];
+  if (props.read) flags.push('R');
+  if (props.write) flags.push('W');
+  if (props.writeWithoutResponse) flags.push('WNR');
+  if (props.notify) flags.push('N');
+  if (props.indicate) flags.push('I');
+  return flags.join(' ');
 }
 
 function decodeValue(dataView) {
@@ -377,6 +431,7 @@ function renderAll() {
   renderConnectionList();
   renderWelcomeList();
   renderActivePill();
+  renderGattExplorer();
 }
 
 function renderDeviceSelects() {
@@ -473,6 +528,44 @@ function renderConfFields() {
       <input type="text" id="conf-${field}" class="text-input" placeholder="—">
     </div>
   `).join('');
+}
+
+function renderGattExplorer() {
+  const sel = document.getElementById('gatt-char-select');
+  const badges = document.getElementById('gatt-badges');
+  const rec = state.devices.get(state.activeDeviceId);
+  sel.innerHTML = '';
+
+  if (!rec || !rec.allChars || !rec.allChars.length) {
+    const opt = document.createElement('option');
+    opt.textContent = rec ? 'No characteristics discovered on this device' : 'No device connected';
+    opt.value = '';
+    sel.appendChild(opt);
+    sel.disabled = true;
+    badges.textContent = '';
+    return;
+  }
+
+  sel.disabled = false;
+  rec.allChars.forEach(entry => {
+    const opt = document.createElement('option');
+    opt.value = entry.key;
+    opt.textContent = `${shortUuid(entry.serviceUuid)} / ${entry.charUuid} [${propsBadges(entry.properties)}]`;
+    sel.appendChild(opt);
+  });
+  updateGattBadges();
+}
+
+function updateGattBadges() {
+  const sel = document.getElementById('gatt-char-select');
+  const badges = document.getElementById('gatt-badges');
+  const rec = state.devices.get(state.activeDeviceId);
+  if (!rec || !sel.value) { badges.textContent = ''; return; }
+  const entry = rec.allChars.find(e => e.key === sel.value);
+  if (!entry) { badges.textContent = ''; return; }
+  badges.textContent = `Properties: ${propsBadges(entry.properties) || 'none'}`;
+  document.getElementById('gatt-subscribe-btn').textContent =
+    rec.gattSubscriptions.has(entry.key) ? 'Unsubscribe' : 'Subscribe';
 }
 
 /* ---------------------------------------------------------------------- */
@@ -610,6 +703,96 @@ function wireLog() {
   });
 }
 
+// Parses the raw-write input: "0x..." is read as hex bytes, anything else
+// is sent as UTF-8 text — lets you test both framings against a
+// characteristic without guessing which one the firmware wants.
+function parseRawInput(value) {
+  const trimmed = value.trim();
+  if (/^0x[0-9a-f]+$/i.test(trimmed)) {
+    const hex = trimmed.slice(2);
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return bytes;
+  }
+  return new TextEncoder().encode(trimmed);
+}
+
+function getSelectedGattEntry() {
+  const rec = state.devices.get(state.activeDeviceId);
+  const sel = document.getElementById('gatt-char-select');
+  if (!rec || !sel.value) return null;
+  return rec.allChars.find(e => e.key === sel.value) || null;
+}
+
+function wireGattExplorer() {
+  document.getElementById('gatt-char-select').addEventListener('change', updateGattBadges);
+
+  document.getElementById('gatt-write-btn').addEventListener('click', async () => {
+    const entry = getSelectedGattEntry();
+    const input = document.getElementById('gatt-write-input');
+    if (!entry) { toast('Select a characteristic first', 'error'); return; }
+    const bytes = parseRawInput(input.value);
+    if (!bytes.length) { toast('Enter something to write', 'error'); return; }
+    try {
+      if (entry.properties.writeWithoutResponse) {
+        await entry.char.writeValueWithoutResponse(bytes);
+      } else {
+        await entry.char.writeValue(bytes);
+      }
+      log(state.activeDeviceId, 'tx', `[${shortUuid(entry.serviceUuid)}/${entry.charUuid.slice(0, 8)}] ${input.value}`);
+    } catch (err) {
+      log(state.activeDeviceId, 'sys', `GATT write failed: ${err.message}`);
+      toast(`Write failed: ${err.message}`, 'error');
+    }
+  });
+
+  document.getElementById('gatt-read-btn').addEventListener('click', async () => {
+    const entry = getSelectedGattEntry();
+    if (!entry) { toast('Select a characteristic first', 'error'); return; }
+    try {
+      const value = await entry.char.readValue();
+      const text = decodeValue(value);
+      log(state.activeDeviceId, 'rx', `[${shortUuid(entry.serviceUuid)}/${entry.charUuid.slice(0, 8)}] ${text}`);
+    } catch (err) {
+      log(state.activeDeviceId, 'sys', `GATT read failed: ${err.message}`);
+      toast(`Read failed: ${err.message}`, 'error');
+    }
+  });
+
+  document.getElementById('gatt-subscribe-btn').addEventListener('click', async () => {
+    const entry = getSelectedGattEntry();
+    const rec = state.devices.get(state.activeDeviceId);
+    if (!entry || !rec) { toast('Select a characteristic first', 'error'); return; }
+    const btn = document.getElementById('gatt-subscribe-btn');
+
+    if (rec.gattSubscriptions.has(entry.key)) {
+      try {
+        entry.char.removeEventListener('characteristicvaluechanged', rec.gattSubscriptions.get(entry.key));
+        await entry.char.stopNotifications();
+      } catch (e) { /* best effort */ }
+      rec.gattSubscriptions.delete(entry.key);
+      btn.textContent = 'Subscribe';
+      log(state.activeDeviceId, 'sys', `Unsubscribed from ${entry.charUuid.slice(0, 8)}`);
+      return;
+    }
+
+    try {
+      const listener = (ev) => {
+        const text = decodeValue(ev.target.value);
+        log(state.activeDeviceId, 'rx', `[${shortUuid(entry.serviceUuid)}/${entry.charUuid.slice(0, 8)}] ${text}`);
+      };
+      await entry.char.startNotifications();
+      entry.char.addEventListener('characteristicvaluechanged', listener);
+      rec.gattSubscriptions.set(entry.key, listener);
+      btn.textContent = 'Unsubscribe';
+      log(state.activeDeviceId, 'sys', `Subscribed to ${entry.charUuid.slice(0, 8)}`);
+    } catch (err) {
+      log(state.activeDeviceId, 'sys', `Subscribe failed: ${err.message}`);
+      toast(`Subscribe failed (characteristic may not support notify): ${err.message}`, 'error');
+    }
+  });
+}
+
 function sendConsoleCommand() {
   const input = document.getElementById('console-input');
   const sel = document.getElementById('console-device-select');
@@ -635,6 +818,7 @@ function init() {
   wireSettings();
   wireAuto();
   wireLog();
+  wireGattExplorer();
   updateAutomodePreview();
   renderAll();
 
