@@ -302,6 +302,27 @@
           <button class="btn btn-accent" id="btn-console-send">Send</button>
         </div>
       </div>
+
+      <div class="panel" style="margin-top:20px;">
+        <div class="panel-row-between">
+          <div>
+            <h2>Raw GATT explorer</h2>
+            <p class="muted">Every service and characteristic the active device actually exposes. Use this to test writes directly against any of them and watch for a response, if the normal command set doesn't seem to be doing anything.</p>
+          </div>
+        </div>
+        <div class="device-select-row" style="margin-top:14px;">
+          <label for="gatt-char-select">Characteristic</label>
+          <select id="gatt-char-select" class="device-select" style="flex:1;"></select>
+        </div>
+        <div class="gatt-badges" id="gatt-badges"></div>
+        <div class="console-input-row" style="margin-top:14px;">
+          <input type="text" id="gatt-write-input" class="text-input" placeholder="Text to write, or 0x-prefixed hex bytes (e.g. 0x01FF)">
+          <button class="btn btn-accent" id="gatt-write-btn">Write</button>
+          <button class="btn btn-ghost" id="gatt-read-btn">Read once</button>
+          <button class="btn btn-ghost" id="gatt-subscribe-btn">Subscribe</button>
+        </div>
+      </div>
+
     </section>
 
   </main>
